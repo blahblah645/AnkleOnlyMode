@@ -1,0 +1,75 @@
+# Open Source Leg — Ankle-Only Mode
+
+This branch adapts the [Open Source Leg (OSL)](https://github.com/neurobionics/opensourceleg) codebase for a **modular ankle-only configuration**, where the knee joint and actuator are physically removed and a single Raspberry Pi controls only the ankle Dephy actuator.
+
+## What this is
+
+This is **not** a fork or rewrite of the OSL library. The core `opensourceleg/` package (`actuators/`, `robots/`, `sensors/`, `control/`) is used exactly as UMich's Neurobionics Lab published it — nothing in that package has been modified. This branch only adds new, ankle-only scripts on top of the existing library.
+
+If you're running the standard two-joint leg, none of this affects you — use the library and examples as normal.
+
+## Why this branch exists
+
+The library's `OpenSourceLeg` class assigns joint roles (`"knee"`, `"ankle"`) purely by **dictionary key**, not by any hardware detection:
+
+```python
+osl = OpenSourceLeg(
+    actuators={
+        "knee": DephyActuator(tag="knee", port="/dev/ttyACM0", ...),
+        "ankle": DephyActuator(tag="ankle", port="/dev/ttyACM1", ...),
+    },
+)
+```
+
+The two-joint example scripts hardcode `"knee"` to `/dev/ttyACM0`. On Linux, `/dev/ttyACM0` vs `/dev/ttyACM1` is assigned by whichever USB serial device the kernel enumerates first — it is **not** tied to which joint is physically knee or ankle. If you run a two-joint script like this on a Pi with only the ankle actuator connected, the ankle actuator will land on `/dev/ttyACM0` and get mislabeled `"knee"`.
+
+This branch avoids that entirely by never using a `"knee"` key at all — see below.
+
+## ⚠️ Important: port labeling
+
+**For ankle-only mode to work correctly, the ankle actuator's script must never contain a `"knee"` dictionary key.** As long as the actuator dictionary in the run script only defines `"ankle"`, the labeling is correct regardless of which `/dev/ttyACMx` port the actuator lands on:
+
+```python
+actuators = {
+    "ankle": DephyActuator(tag="ankle", port="/dev/ttyACM0", ...),
+}
+```
+
+There is no `"knee"` entry competing for that port, so there's nothing to mislabel.
+
+**If you plug in additional USB-serial devices** (a second actuator for bench testing, a debug adapter, etc.), the ankle actuator's assigned port (`ttyACM0` vs `ttyACM1`) can shift depending on enumeration order. Always verify the correct port before running:
+
+```bash
+ls /dev/ttyACM*
+```
+
+For a setup that's robust regardless of plug-in order, consider adding a udev rule that pins a fixed device name to the actuator's USB serial number (not included in this branch, but recommended if you're running other USB-serial devices on the same Pi).
+
+## What was added
+
+| File | Purpose |
+|---|---|
+| `examples/basic_motion_ankle_only.py` | Ankle-only version of `basic_motion.py`. Moves the ankle actuator through a test range of motion — no knee code included, for verifying a single-actuator setup is functional. |
+| *(existing, unmodified)* `examples/fsm_walking_ankle_python_controller.py` | UMich's own ankle-only gait FSM example — already ships in the base repo and is the reference this branch's scripts follow. |
+
+## Setup
+
+1. Confirm hardware connection:
+   ```bash
+   i2cdetect -y 1
+   ls /dev/ttyACM*
+   ```
+   You should see exactly one `/dev/ttyACMx` device for the ankle actuator.
+
+2. Update the port in the script if needed to match what `ls /dev/ttyACM*` shows.
+
+3. Run the basic motion test to confirm the ankle actuator is functional:
+   ```bash
+   python examples/basic_motion_ankle_only.py
+   ```
+
+4. For full gait control, use `examples/fsm_walking_ankle_python_controller.py`, updating the load cell calibration matrix and gait gains for your hardware.
+
+## Credit
+
+Base library and examples: Kevin Best, Senthur Ayyappan, Matteo Crotti, and the University of Michigan Neurobionics Lab. This branch only adds ankle-only run scripts on top of their unmodified work.
